@@ -1,130 +1,98 @@
-AC_INIT([ccminer_CPU], [3.8.3], [], [ccminer], [http://github.com/monkins1010/ccminer])
+AC_PREREQ([2.60])
+AC_INIT([jansson], [2.6], [petri@digip.org])
 
-AC_PREREQ([2.59c])
-AC_CANONICAL_SYSTEM
-AC_CONFIG_SRCDIR([ccminer.cpp])
-AM_INIT_AUTOMAKE([foreign subdir-objects])
-AC_CONFIG_HEADERS([ccminer-config.h])
+AC_CONFIG_MACRO_DIR([m4])
 
-dnl Make sure anyone changing configure.ac/Makefile.am has a clue
-AM_MAINTAINER_MODE
+AM_INIT_AUTOMAKE([1.10 foreign])
+m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
-dnl Checks for programs
-AC_PROG_CC_C99
-AC_PROG_GCC_TRADITIONAL
-AM_PROG_CC_C_O
-AM_PROG_AS
-AC_PROG_RANLIB
-AC_PROG_CXX
-AC_OPENMP
+AC_CONFIG_SRCDIR([value.c])
+AC_CONFIG_HEADERS([jansson_private_config.h])
 
-dnl Checks for header files
-AC_HEADER_STDC
-AC_CHECK_HEADERS([sys/endian.h sys/param.h syslog.h])
-# sys/sysctl.h requires sys/types.h on FreeBSD
-# sys/sysctl.h requires sys/param.h on OpenBSD
-AC_CHECK_HEADERS([sys/sysctl.h], [], [],
-[#include <sys/types.h>
-#ifdef HAVE_SYS_PARAM_H
-#include <sys/param.h>
-#endif
-])
+# Checks for programs.
+AC_PROG_CC
+AC_PROG_LIBTOOL
+AM_CONDITIONAL([GCC], [test x$GCC = xyes])
 
-AC_CHECK_DECLS([be32dec, le32dec, be32enc, le32enc], [], [],
-[AC_INCLUDES_DEFAULT
-#ifdef HAVE_SYS_ENDIAN_H
-#include <sys/endian.h>
-#endif
-])
+# Checks for libraries.
 
-AC_FUNC_ALLOCA
-AC_CHECK_FUNCS([getopt_long])
+# Checks for header files.
+AC_CHECK_HEADERS([endian.h fcntl.h locale.h sched.h unistd.h sys/param.h sys/stat.h sys/time.h sys/types.h])
 
-case $target in
-  i*86-*-*)
-    have_x86=true
-    ;;
-  x86_64-*-*)
-    have_x86=true
-    have_x86_64=true
-    ;;
-  amd64-*-*)
-    have_x86=true
-    have_x86_64=true
-    ;;
+# Checks for typedefs, structures, and compiler characteristics.
+AC_TYPE_INT32_T
+AC_TYPE_UINT32_T
+AC_TYPE_LONG_LONG_INT
+
+AC_C_INLINE
+case $ac_cv_c_inline in
+    yes) json_inline=inline;;
+    no) json_inline=;;
+    *) json_inline=$ac_cv_c_inline;;
 esac
+AC_SUBST([json_inline])
 
-PTHREAD_FLAGS="-pthread"
-WS2_LIBS=""
+# Checks for library functions.
+AC_CHECK_FUNCS([close getpid gettimeofday localeconv open read sched_yield strtoll])
 
-case $target in
-  *-*-mingw*)
-    have_win32=true
-    PTHREAD_FLAGS=""
-    WS2_LIBS="-lws2_32"
-    ;;
-  *86*-apple-darwin*)
-    have_osx=true
-    PTHREAD_FLAGS=""
-    ;;
+AC_MSG_CHECKING([for gcc __sync builtins])
+have_sync_builtins=no
+AC_TRY_LINK(
+  [], [unsigned long val; __sync_bool_compare_and_swap(&val, 0, 1);],
+  [have_sync_builtins=yes],
+)
+if test "x$have_sync_builtins" = "xyes"; then
+  AC_DEFINE([HAVE_SYNC_BUILTINS], [1],
+    [Define to 1 if gcc's __sync builtins are available])
+fi
+AC_MSG_RESULT([$have_sync_builtins])
+
+AC_MSG_CHECKING([for gcc __atomic builtins])
+have_atomic_builtins=no
+AC_TRY_LINK(
+  [], [char l; unsigned long v; __atomic_test_and_set(&l, __ATOMIC_RELAXED); __atomic_store_n(&v, 1, __ATOMIC_ACQ_REL); __atomic_load_n(&v, __ATOMIC_ACQUIRE);],
+  [have_atomic_builtins=yes],
+)
+if test "x$have_atomic_builtins" = "xyes"; then
+  AC_DEFINE([HAVE_ATOMIC_BUILTINS], [1],
+    [Define to 1 if gcc's __atomic builtins are available])
+fi
+AC_MSG_RESULT([$have_atomic_builtins])
+
+case "$ac_cv_type_long_long_int$ac_cv_func_strtoll" in
+     yesyes) json_have_long_long=1;;
+     *) json_have_long_long=0;;
 esac
+AC_SUBST([json_have_long_long])
 
-AC_CHECK_LIB(jansson, json_loads, request_jansson=false, request_jansson=true)
-AC_CHECK_LIB([pthread], [pthread_create], PTHREAD_LIBS="-lpthread",
-  AC_CHECK_LIB([pthreadGC2], [pthread_create], PTHREAD_LIBS="-lpthreadGC2",
-    AC_CHECK_LIB([pthreadGC1], [pthread_create], PTHREAD_LIBS="-lpthreadGC1",
-      AC_CHECK_LIB([pthreadGC], [pthread_create], PTHREAD_LIBS="-lpthreadGC"
-))))
+case "$ac_cv_header_locale_h$ac_cv_func_localeconv" in
+     yesyes) json_have_localeconv=1;;
+     *) json_have_localeconv=0;;
+esac
+AC_SUBST([json_have_localeconv])
 
-AC_CHECK_LIB([z],[gzopen], [], [])
-AC_CHECK_LIB([ssl],[SSL_free], [], [AC_MSG_ERROR([OpenSSL library required])])
-AC_CHECK_LIB([crypto],[EVP_DigestFinal_ex], [], [AC_MSG_ERROR([OpenSSL library required])])
+# Features
+AC_ARG_ENABLE([urandom],
+  [AS_HELP_STRING([--disable-urandom],
+    [Don't use /dev/urandom to seed the hash function])],
+  [use_urandom=$enableval], [use_urandom=yes])
 
-AM_CONDITIONAL([WANT_JANSSON], [test x$request_jansson = xtrue])
-AM_CONDITIONAL([HAVE_WINDOWS], [test x$have_win32 = xtrue])
-AM_CONDITIONAL([HAVE_OSX], [test x$have_osx = xtrue])
-AM_CONDITIONAL([ARCH_x86], [test x$have_x86 = xtrue])
-AM_CONDITIONAL([ARCH_x86_64], [test x$have_x86_64 = xtrue])
-
-if test x$request_jansson = xtrue
-then
-	JANSSON_LIBS="compat/jansson/libjansson.a"
-else
-	JANSSON_LIBS=-ljansson
+if test "x$use_urandom" = xyes; then
+AC_DEFINE([USE_URANDOM], [1],
+  [Define to 1 if /dev/urandom should be used for seeding the hash function])
 fi
 
+AC_ARG_ENABLE([windows-cryptoapi],
+  [AS_HELP_STRING([--disable-windows-cryptoapi],
+    [Don't use CryptGenRandom to seed the hash function])],
+  [use_windows_cryptoapi=$enableval], [use_windows_cryptoapi=yes])
 
-AC_SUBST(JANSSON_LIBS)
-AC_SUBST(PTHREAD_FLAGS)
-AC_SUBST(PTHREAD_LIBS)
-AC_SUBST(WS2_LIBS)
+if test "x$use_windows_cryptoapi" = xyes; then
+AC_DEFINE([USE_WINDOWS_CRYPTOAPI], [1],
+  [Define to 1 if CryptGenRandom should be used for seeding the hash function])
+fi
 
 AC_CONFIG_FILES([
-	Makefile
-	compat/Makefile
-	compat/jansson/Makefile
-	])
-
-dnl find out what version we are running
-ARCH=`uname -m`
-if [[ $ARCH == "x86_64" ]];
-then
-  SUFFIX="64"
-else
-  SUFFIX=""
-fi
-
-if test x$have_osx = xtrue
-then
-  SUFFIX=""
-fi
-
-
-
-
-
-
-
-AC_SUBST(OPENMP_CFLAGS) 
-
+        Makefile
+])
 AC_OUTPUT
